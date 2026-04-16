@@ -1,0 +1,206 @@
+
+<style>
+  .cx-wrap { padding: 1rem 0; font-family: var(--font-sans); }
+  .cx-section { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 1rem 1.25rem; margin-bottom: 1rem; }
+  .cx-label { font-size: 12px; color: var(--color-text-secondary); margin-bottom: 4px; }
+  .cx-input { width: 100%; box-sizing: border-box; }
+  .cx-day-grid { display: grid; grid-template-columns: repeat(7, minmax(0,1fr)); gap: 8px; }
+  .cx-day { text-align: center; }
+  .cx-day-name { font-size: 11px; color: var(--color-text-secondary); margin-bottom: 4px; font-weight: 500; }
+  .cx-day input { text-align: center; }
+  .cx-exp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .cx-stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 10px; }
+  .cx-stat { background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 0.75rem 1rem; }
+  .cx-stat-label { font-size: 12px; color: var(--color-text-secondary); margin-bottom: 4px; }
+  .cx-stat-val { font-size: 20px; font-weight: 500; color: var(--color-text-primary); }
+  .cx-section-title { font-size: 13px; font-weight: 500; color: var(--color-text-secondary); margin-bottom: 12px; letter-spacing: 0.03em; }
+  .cx-bar-wrap { margin-top: 1rem; }
+  .cx-bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .cx-bar-label { font-size: 12px; color: var(--color-text-secondary); width: 32px; text-align: right; }
+  .cx-bar-bg { flex: 1; background: var(--color-background-secondary); border-radius: 4px; height: 20px; overflow: hidden; }
+  .cx-bar { height: 100%; border-radius: 4px; transition: width 0.3s; display: flex; align-items: center; padding-left: 8px; }
+  .cx-bar-amt { font-size: 11px; font-weight: 500; }
+  .cx-profit-bar { background: var(--color-background-secondary); border-radius: 4px; height: 10px; margin-top: 8px; overflow: hidden; }
+  .cx-note { font-size: 12px; color: var(--color-text-secondary); margin-top: 8px; }
+  .green { color: #3B6D11; }
+  .red { color: #A32D2D; }
+  .week-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .week-nav button { font-size: 13px; padding: 4px 12px; }
+  .week-label { font-size: 14px; font-weight: 500; color: var(--color-text-primary); }
+  .save-btn { width: 100%; margin-top: 8px; padding: 8px; font-size: 14px; font-weight: 500; }
+  .cx-alert { border-radius: var(--border-radius-md); padding: 8px 12px; font-size: 13px; margin-top: 10px; }
+  .cx-alert.warn { background: #FAEEDA; color: #854F0B; }
+  .cx-alert.ok { background: #EAF3DE; color: #3B6D11; }
+</style>
+
+<div class="cx-wrap">
+  <h2 class="sr-only">Chai Xpress weekly cash flow tracker</h2>
+
+  <div class="week-nav">
+    <button onclick="changeWeek(-1)">&#8592; Prev</button>
+    <span class="week-label" id="week-label">This week</span>
+    <button onclick="changeWeek(1)">Next &#8594;</button>
+  </div>
+
+  <div class="cx-section">
+    <div class="cx-section-title">Daily sales (AED)</div>
+    <div class="cx-day-grid" id="sales-grid"></div>
+    <div class="cx-bar-wrap" id="bar-chart"></div>
+  </div>
+
+  <div class="cx-section">
+    <div class="cx-section-title">Weekly expenses</div>
+    <div class="cx-exp-grid" id="exp-grid"></div>
+  </div>
+
+  <div class="cx-section">
+    <div class="cx-section-title">Summary</div>
+    <div class="cx-stat-grid" id="summary"></div>
+    <div id="alert-box"></div>
+  </div>
+
+  <button class="save-btn" onclick="saveWeek()">Save this week &#8594;</button>
+  <p class="cx-note" id="save-note"></p>
+</div>
+
+<script>
+const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const EXP_ITEMS = [
+  { key:'rent', label:'Rent (weekly share)', default: Math.round(5800/4) },
+  { key:'utilities', label:'Utilities / gas', default: Math.round(5000/4) },
+  { key:'salaries', label:'Staff salaries', default: Math.round(14000/4) },
+  { key:'ingredients', label:'Ingredients / supplies', default: 3000 },
+  { key:'internet', label:'Internet / misc', default: Math.round(1000/4) },
+  { key:'other', label:'Other expenses', default: 0 },
+];
+
+let currentWeekOffset = 0;
+let weeksData = {};
+
+function getWeekKey(offset) {
+  const d = new Date();
+  d.setDate(d.getDate() - d.getDay() + offset * 7);
+  return `${d.getFullYear()}-W${String(Math.ceil((d.getDate() - d.getDay() + 6)/7)).padStart(2,'0')}`;
+}
+
+function getWeekDates(offset) {
+  const d = new Date();
+  d.setDate(d.getDate() - d.getDay() + offset * 7);
+  const start = new Date(d);
+  const end = new Date(d);
+  end.setDate(end.getDate() + 6);
+  const fmt = dt => `${dt.getDate()}/${dt.getMonth()+1}`;
+  return `${fmt(start)} – ${fmt(end)}`;
+}
+
+function getCurrentData() {
+  const key = getWeekKey(currentWeekOffset);
+  if (!weeksData[key]) {
+    weeksData[key] = {
+      sales: [0,0,0,0,0,0,0],
+      expenses: {}
+    };
+    EXP_ITEMS.forEach(e => weeksData[key].expenses[e.key] = e.default);
+  }
+  return weeksData[key];
+}
+
+function buildSalesGrid() {
+  const data = getCurrentData();
+  const grid = document.getElementById('sales-grid');
+  grid.innerHTML = '';
+  DAYS.forEach((d, i) => {
+    const div = document.createElement('div');
+    div.className = 'cx-day';
+    div.innerHTML = `<div class="cx-day-name">${d}</div><input class="cx-input" type="number" min="0" step="50" value="${data.sales[i]}" oninput="updateSale(${i}, this.value)">`;
+    grid.appendChild(div);
+  });
+  updateBars();
+}
+
+function buildExpGrid() {
+  const data = getCurrentData();
+  const grid = document.getElementById('exp-grid');
+  grid.innerHTML = '';
+  EXP_ITEMS.forEach(e => {
+    const div = document.createElement('div');
+    div.innerHTML = `<div class="cx-label">${e.label}</div><input class="cx-input" type="number" min="0" step="50" value="${data.expenses[e.key]}" oninput="updateExp('${e.key}', this.value)">`;
+    grid.appendChild(div);
+  });
+}
+
+function updateSale(i, val) {
+  getCurrentData().sales[i] = parseFloat(val)||0;
+  updateSummary();
+  updateBars();
+}
+
+function updateExp(key, val) {
+  getCurrentData().expenses[key] = parseFloat(val)||0;
+  updateSummary();
+}
+
+function updateBars() {
+  const data = getCurrentData();
+  const maxSale = Math.max(...data.sales, 1000);
+  const chart = document.getElementById('bar-chart');
+  chart.innerHTML = data.sales.map((s,i) => {
+    const pct = Math.round((s/maxSale)*100);
+    const color = s >= 1500 ? '#639922' : s >= 1000 ? '#BA7517' : '#D85A30';
+    return `<div class="cx-bar-row">
+      <span class="cx-bar-label">${DAYS[i]}</span>
+      <div class="cx-bar-bg">
+        <div class="cx-bar" style="width:${pct}%;background:${color};">
+          <span class="cx-bar-amt" style="color:#fff;font-size:11px;">${s > 0 ? s.toLocaleString() : ''}</span>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function updateSummary() {
+  const data = getCurrentData();
+  const totalRevenue = data.sales.reduce((a,b)=>a+b,0);
+  const totalExp = Object.values(data.expenses).reduce((a,b)=>a+b,0);
+  const netProfit = totalRevenue - totalExp;
+  const avgDay = data.sales.filter(s=>s>0).length ? Math.round(totalRevenue / data.sales.filter(s=>s>0).length) : 0;
+  const margin = totalRevenue > 0 ? Math.round((netProfit/totalRevenue)*100) : 0;
+
+  document.getElementById('summary').innerHTML = `
+    <div class="cx-stat"><div class="cx-stat-label">Total revenue</div><div class="cx-stat-val">${totalRevenue.toLocaleString()} AED</div></div>
+    <div class="cx-stat"><div class="cx-stat-label">Total expenses</div><div class="cx-stat-val">${totalExp.toLocaleString()} AED</div></div>
+    <div class="cx-stat"><div class="cx-stat-label">Net profit</div><div class="cx-stat-val ${netProfit >= 0 ? 'green' : 'red'}">${netProfit >= 0 ? '+' : ''}${netProfit.toLocaleString()} AED</div></div>
+    <div class="cx-stat"><div class="cx-stat-label">Daily avg</div><div class="cx-stat-val">${avgDay.toLocaleString()} AED</div></div>
+  `;
+
+  const alertBox = document.getElementById('alert-box');
+  if (netProfit < 0) {
+    alertBox.innerHTML = `<div class="cx-alert warn">You are short by ${Math.abs(netProfit).toLocaleString()} AED this week. Review expenses or push for 2 more strong days.</div>`;
+  } else if (avgDay >= 1800) {
+    alertBox.innerHTML = `<div class="cx-alert ok">Great week! Daily avg above 1800 AED — on track toward 3000 AED/day goal.</div>`;
+  } else if (totalRevenue > 0) {
+    alertBox.innerHTML = `<div class="cx-alert warn">Margin this week: ${margin}%. Target is 15%+ — check ingredient costs and staffing hours.</div>`;
+  } else {
+    alertBox.innerHTML = '';
+  }
+}
+
+function changeWeek(dir) {
+  currentWeekOffset += dir;
+  document.getElementById('week-label').textContent = getWeekDates(currentWeekOffset);
+  buildSalesGrid();
+  buildExpGrid();
+  updateSummary();
+}
+
+function saveWeek() {
+  const key = getWeekKey(currentWeekOffset);
+  const note = document.getElementById('save-note');
+  note.textContent = `Week ${key} saved. Use the arrows to compare with next or previous weeks.`;
+}
+
+document.getElementById('week-label').textContent = getWeekDates(0);
+buildSalesGrid();
+buildExpGrid();
+updateSummary();
+</script>
